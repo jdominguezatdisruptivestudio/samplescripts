@@ -1,0 +1,80 @@
+name: pgdump selfservice
+on:
+
+# Triggers the workflow on push events for non production branch
+  push:
+    paths:
+      - 'pgdump-selfservice.jd'
+    branches:
+      - pgdumps
+
+# Job to enter to root folder, pull changes and restart container
+jobs:
+
+# This workflow contains a single job called "build"
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+
+# Get the branch name
+    - name: Get branch name
+      shell: bash
+      run: echo "BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | tr / -)" >> $GITHUB_ENV
+
+# Executing ssh commands on the app server      
+    - name: Execute remote ssh commands
+      uses: appleboy/ssh-action@master
+
+# Enter the specific path and container name for this app
+      env: 
+         REPO: 'reponame'
+         CONTAINER: 'reponame-app'
+         MY_BRANCH: ${{ env.BRANCH_NAME }} 
+      with:
+         host: ${{ secrets.ACTION_HOST_STAGINAPP }}
+         username: ${{ secrets.ACTION_USER }}
+         key: ${{ secrets.ACTION_KEY }}
+         port: ${{ secrets.ACTION_PORT }}
+         envs: REPO,CONTAINER,MY_BRANCH
+
+# Stop script on first failure         
+         #script_stop: true
+         script: |
+          echo "branch: $MY_BRANCH"
+          echo "repo: $REPO"
+          echo "container: $CONTAINER"
+          
+          ssh -p 2021 postgres@10.130.126.162 "ppgaction-dump.sh $REPO_db"
+# Calling slack step if condition is met
+    - name: Send Slack Notification on SUCCESS
+      if: success()
+      uses: tokorom/action-slack-incoming-webhook@main
+      env:
+        INCOMING_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_DEVOPS }}
+      with:
+        text: Github Action pgdump self-service
+
+# Slack payload
+        attachments: |
+          [
+            {
+              "color": "good",
+              "author_name": "${{ github.actor }}",
+              "author_icon": "${{ github.event.sender.avatar_url }}",
+              "fields": [
+                {
+                  "title": "Repository",
+                  "value": "${{ github.repository }}"
+                },
+                {
+                  "title": "Branch",
+                  "value": "${{ env.BRANCH_NAME }}"
+                },
+                {
+                  "title": "GitHub Actions URL",
+                  "value": "${{ github.event.repository.url }}/actions/runs/${{ github.run_id }}"
+                }
+              ]
+            }
+          ]
